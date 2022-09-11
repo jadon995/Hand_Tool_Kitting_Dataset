@@ -18,6 +18,7 @@ visualizer/client/package-lock.json
 dataset/ABC_CHUNK*
 dataset/vol_match_6DoF_abc*
 dataset/vol_match_abc*
+dataset/toolbox_cad*
 real_world/dataset/
 
 # asset files
