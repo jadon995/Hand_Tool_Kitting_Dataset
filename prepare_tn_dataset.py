@@ -15,6 +15,7 @@ import pybullet as p
 from skimage.morphology import label
 import ray
 from os.path import exists
+import matplotlib.pyplot as plt
 
 def generate_tn_object(obj_path, obj_bounds, voxel_size, image_size, target_height):
     """ Generate object for TransporterNet
@@ -55,7 +56,7 @@ def generate_tn_object(obj_path, obj_bounds, voxel_size, image_size, target_heig
     obj_bounds[:2, 0] = -obj_bounds_mod[:2]
     obj_bounds[:2, 1] = +obj_bounds_mod[:2]
 
-    # 
+    # adjust the bounds to make them slightly bigger (may be deprecated)
     delta = 0.01
     obj_bounds_zoomed = np.copy(obj_bounds)
     obj_bounds_zoomed[:2, 0] -= delta  # Only along x,y axis
@@ -72,9 +73,13 @@ def generate_tn_object(obj_path, obj_bounds, voxel_size, image_size, target_heig
 
     # 1 indicates empty while -1 indicates occupied
     occ_grid = np.ones_like(part_tsdf)
-    occ_grid[part_tsdf < 0] = -1
+    occ_grid[part_tsdf < 0.2] = -1  # the threhold is selected to keep most grida 
     occ_grid_proj = occ_grid.min(axis=2)
     print(occ_grid_proj.shape)
+
+    # For debuging the projected occ grid
+    # plt.imshow(occ_grid_proj, cmap='gray',clim=(-1,1))
+    # plt.show()
 
     height = target_height
     occ_grid = np.repeat(occ_grid_proj[:,:,np.newaxis], int(height/voxel_size), axis=2)
