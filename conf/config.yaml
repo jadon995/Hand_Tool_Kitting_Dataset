@@ -4,8 +4,8 @@
 defaults:
   - env: env 
   - evaluate: tn_model
-  # - ray: disabled
   - ray: single_node
+  # - ray: disabled
   - train: shape_completion
   - data_gen: seg_sc
 
@@ -15,16 +15,16 @@ seeds:
   train: 3
   test: 100
 
-# preprocess_paths: ["dataset/train_sc.txt", 
-#                    "dataset/val_sc.txt", 
-#                    "dataset/train.txt", 
-#                    "dataset/val.txt"]
-
+#preprocess_paths: ["dataset/train_sc.txt", 
+#                   "dataset/val_sc.txt", 
+#                   "dataset/train.txt", 
+#                   "dataset/val.txt"]
 preprocess_paths: ["dataset/train.txt"]
 
 vol_match_6DoF:
   # data generation
-  gpu_frac: 1
+  # gpu_frac: 1
+  gpu_frac: 0.1
   unit_kit: False
   p0_vol_shape_gen: [128, 128, 128] # vox_size = 0.0008928571428571428
   p1_vol_shape_gen: [400, 400, 256]
@@ -60,10 +60,11 @@ vol_match_6DoF:
   proj_head: False
 
   dataset_size: 1000
-  dataset_path: "dataset/vol_match_abc"
+  # dataset_path: "dataset/vol_match_abc"
+  dataset_path: "/media/jadon/New Volume/SEaT/dataset/vol_match_abc"
   dataset_split: "val"
   lite: False
-  load_model: True
+  load_model: False
   max_yaw_pitch: 15 # for no user input, in degrees
 
   # <-------------------------> #
