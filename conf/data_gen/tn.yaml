@@ -1,10 +1,19 @@
 # This file contains the parameters for data generation of transporter net.
 
 root_data_path: "dataset/toolbox_cad/"
+output_data_path: "dataset/toolbox_cad/tn"
 
 image_size: [720, 1280]  # height, width
 voxel_size: 0.001
 target_height: 0.02
+
+tool_info:
+  - type: "hammer"
+    num: 15
+    length: 0.2
+  - type: "plier"
+    num: 15
+    length: 0.18
 
 # it affects the output directory
 hydra:
