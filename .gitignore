@@ -27,5 +27,6 @@ real_world/dataset/
 *.pth
 *.log
 *.png
+*.pyc
 
 seat.egg-info/

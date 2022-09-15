@@ -15,6 +15,7 @@ import pybullet as p
 from skimage.morphology import label
 import ray
 from os.path import exists
+from scipy import ndimage
 import matplotlib.pyplot as plt
 
 def generate_tn_object(obj_path, output_path, voxel_size, image_size, target_height, target_length):
@@ -65,8 +66,9 @@ def generate_tn_object(obj_path, output_path, voxel_size, image_size, target_hei
     obj_bounds_zoomed[:2, 0] -= delta  # Only along x,y axis
     obj_bounds_zoomed[:2, 1] += delta
     # obj_bounds_zoomed = obj_bounds
+    # print(obj_bounds_zoomed)
 
-    print(obj_bounds)
+    # voxelize the mesh data
     part_tsdf = TSDFHelper.tsdf_from_camera_data(
         views=[(color_im, depth_im,
                 camera.intrinsics,
@@ -75,23 +77,35 @@ def generate_tn_object(obj_path, output_path, voxel_size, image_size, target_hei
         voxel_size=voxel_size,
     )
 
+    # project the 3D volume to a 2D plane
     # 1 indicates empty while -1 indicates occupied
+    tsdf_thresh = 0.2
     occ_grid = np.ones_like(part_tsdf)
-    occ_grid[part_tsdf < 0.2] = -1  # the threhold is selected to keep most grida 
-    occ_grid_proj = occ_grid.min(axis=2)
-    print(occ_grid_proj.shape)
+    occ_grid[part_tsdf < tsdf_thresh] = -1  # the threhold is selected to keep most actural grids 
+    occ_grid_proj = occ_grid.min(axis=2) # project mesh onto a 2D plane
 
-    # For debuging the projected occ grid
+    # For testing purpose - the use of plt interrupts the simulation
     # plt.imshow(occ_grid_proj, cmap='gray',clim=(-1,1))
-    # plt.show()
+    # plt.savefig(obj_path.parent/"before.png")
+    # plt.close()
 
-    height = target_height
+    # perform closing operation to remove noise
+    binary_mask = occ_grid_proj < tsdf_thresh
+    binary_mask = ndimage.binary_closing(binary_mask, structure=np.ones((5,5)))
+    occ_grid_proj[binary_mask] = -1
+
+    # For testing purpose - the use of plt interrupts the simulation
+    # plt.imshow(occ_grid_proj, cmap='gray',clim=(-1,1))
+    # plt.savefig(obj_path.parent/"after.png")
+    # plt.close()
+
+    # concatenate the 2D projection to form a 3D volume
     layer = int(target_height / voxel_size) + 2
     occ_grid = np.repeat(occ_grid_proj[:,:,np.newaxis], layer, axis=2)
     # occ_grid[occ_grid == 0] = 1
     # occ_grid = -occ_grid
 
-    # tn_obj_path = obj_path.parent / "tn_obj.obj"
+    # save the mesh
     if TSDFHelper.to_mesh(occ_grid, output_path, voxel_size, vol_origin=[0, 0, (layer - 1) / 2.0 * voxel_size]):
         print(output_path)
     else:
@@ -141,21 +155,11 @@ def main(cfg: DictConfig):
         tool_folder = output_path / type
         tool_folder.mkdir(parents=True, exist_ok=True)
 
-        target_length = target_length
         for i in range(num):
             tn_obj_path = tool_folder / f'{i:02d}.obj'
 
             generate_tn_object(object_paths[type][i],tn_obj_path, voxel_size,
                                image_size, target_height, target_length)
-            # break
-
-        # for i in range(num):
-
-    # output_path = Path(cfg.output_data_path)
-    # sub_output_path = output_path / f"hammer" / f'{1:02d}' 
-    # sub_output_path.mkdir(parents=True, exist_ok=True)
-    # generate_tn_object(object_paths["hammer"][0], None, voxel_size, image_size, target_height, tool_info[0]['length'])
-    # return
 
 
 if __name__ == "__main__":
