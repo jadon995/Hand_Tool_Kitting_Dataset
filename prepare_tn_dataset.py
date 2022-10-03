@@ -41,7 +41,7 @@ def generate_tn_object(obj_path, output_path, voxel_size, image_size, target_hei
     # scale to suitable size
     scale_factor = target_length / (mesh.vertices.max(axis=0)-mesh.vertices.min(axis=0))[1]
     mesh.vertices *= scale_factor
-    mesh.vertices[:, 1] -= ( (mesh.vertices.max(axis=0) + mesh.vertices.min(axis=0)) / 2)[1]
+    mesh.vertices[:, 0:2] -= ( (mesh.vertices.max(axis=0) + mesh.vertices.min(axis=0)) / 2)[0:2]
     mesh.vertices[:, 2] -= mesh.vertices.min(axis=0)[2] + 0
     processed_obj_path = obj_path.parent / f"obj.obj"
     mesh.export(processed_obj_path)

@@ -14,6 +14,12 @@ tool_info:
   - type: "plier"
     num: 15
     length: 0.18
+  - type: "wrench"
+    num: 15
+    length: 0.18
+  - type: "screwdriver"
+    num: 15
+    length: 0.18
 
 # it affects the output directory
 hydra:
