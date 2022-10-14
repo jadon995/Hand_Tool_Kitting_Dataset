@@ -110,6 +110,13 @@ def generate_tn_object(obj_path, output_path, voxel_size, image_size, target_hei
         print(output_path)
     else:
         print("Failed")
+        return
+    
+    collision_path = output_path.parent / (output_path.name[:-4] + '_coll.obj')
+    name_log = output_path.parent / (output_path.name[:-4] + '_log.txt')
+    p.vhacd(str(output_path), str(collision_path), str(name_log))
+    name_log.unlink()
+    print(collision_path)
 
     return
 
