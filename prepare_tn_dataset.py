@@ -44,6 +44,7 @@ def generate_tn_object(obj_path, output_path, voxel_size, image_size, target_hei
     mesh.vertices[:, 0:2] -= ( (mesh.vertices.max(axis=0) + mesh.vertices.min(axis=0)) / 2)[0:2]
     mesh.vertices[:, 2] -= mesh.vertices.min(axis=0)[2] + 0
     processed_obj_path = obj_path.parent / f"obj.obj"
+    # processed_obj_path = output_path.parent / (output_path.name[:-4] + '_raw.obj')
     mesh.export(processed_obj_path)
 
     urdf_path = MeshRendererEnv.dump_obj_urdf(processed_obj_path, 
@@ -112,9 +113,11 @@ def generate_tn_object(obj_path, output_path, voxel_size, image_size, target_hei
         print("Failed")
         return
     
+    # use vhacd to generate the collision model
     collision_path = output_path.parent / (output_path.name[:-4] + '_coll.obj')
     name_log = output_path.parent / (output_path.name[:-4] + '_log.txt')
     p.vhacd(str(output_path), str(collision_path), str(name_log))
+    # p.vhacd(str(processed_obj_path), str(collision_path), str(name_log))
     name_log.unlink()
     print(collision_path)
 
