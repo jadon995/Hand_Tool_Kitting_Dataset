@@ -16,32 +16,8 @@ import pybullet as p
 from skimage.morphology import label
 import ray
 from os.path import exists
-from scipy import ndimage
+from scipy import ndimage as ndi
 import matplotlib.pyplot as plt
-
-def generate_tool_kit(obj_paths, output_path, tool_info, kit_size, voxel_size, image_size):
-    """ Generate tool kits"""
-    
-    env = BaseEnv(gui=True)
-    p.setGravity(0,0,0)
-
-    # Setup an orthographic camera
-    focal_length = 64e4
-    z=-200
-    view_matrix = p.computeViewMatrix((0, 0, z), (0, 0, 0), (1, 0, 0))
-    camera = SimCameraBase(view_matrix, image_size,
-                           z_near=-z-0.05, z_far=-z+0.05, focal_length=focal_length)
-
-    # Sample objects randonly
-    tools = ['hammer', 'plier', 'screwdriver', 'wrench']
-    n_objects = [1, 1, 1, 1]
-    obj_shapes = []
-    
-
-
-
-
-    return
 
 
 class KitGenerator():
@@ -98,7 +74,10 @@ class KitGenerator():
                     obj_shape = np.random.choice(self.test_set, self.n_objects[i])
             obj_shapes.append(obj_shape)
 
+        # Kit volume
         kit_vol_shape = np.ceil(self.kit_size / self.voxel_size).astype(np.int) # e.g. [280, 260, 50]
+        kit_vol = -1 * np.ones((kit_vol_shape))
+        point_x = 0.02
         print('kit_vol_shape', kit_vol_shape)
         
         # Build Kit
@@ -114,7 +93,7 @@ class KitGenerator():
                 # mesh = trimesh.load(shape, force='mesh')
                 urdf_path = MeshRendererEnv.dump_obj_urdf(shape, 
                                     rgba=np.array([0, 1, 0, 1]), load_collision_mesh=True)
-                p.loadURDF(str(urdf_path))
+                object_id = p.loadURDF(str(urdf_path))
                 urdf_path.unlink()
 
                 # define the object bounds
@@ -122,7 +101,7 @@ class KitGenerator():
                 obj_bounds = np.zeros((3,2), dtype=np.float32)
                 obj_bounds[:,0] = mesh.vertices.min(axis=0)
                 obj_bounds[:,1] = mesh.vertices.max(axis=0)
-                delta = 0.01 # margin is 10 mm
+                delta = 0.003 # margin is 3mm mm
                 obj_bounds[:2, 0] -= delta
                 obj_bounds[:2, 1] += delta
 
@@ -134,9 +113,21 @@ class KitGenerator():
                     bounds=obj_bounds,
                     voxel_size=self.voxel_size,
                 )
+                p.removeBody(object_id)
+
+                mask3d = part_tsdf < 1.0
+                print(mask3d[3,3,:])
+                print(mask3d.shape)
+                diamond = ndi.generate_binary_structure(rank=3, connectivity=1)
+                mask3d = ndi.binary_dilation(mask3d, diamond, iterations=5)
+                # mask3d = ndi.binary_erosion(mask3d, diamond, iterations=5)
+                # mask3d = ndi.binary_closing(mask3d, diamond, iterations=1)
+                # mask3d = ndi.binary_opening(mask3d, diamond, iterations=1)
+
 
                 occ_grid = np.zeros_like(part_tsdf)
-                occ_grid[part_tsdf < 0.2] = -1
+                # occ_grid[part_tsdf < 1.0] = -1
+                occ_grid[mask3d] = -1
                 # # now. Shift the obj volume 
                 # max_delta_voxels = max(1, np.ceil(delta / self.voxel_size).astype(np.int))
                 # k = np.where(occ_grid == -1)
@@ -148,10 +139,10 @@ class KitGenerator():
 
                 part_tsdf = -occ_grid
                 # Ok. Now wrap this volumes inside the proper kit volume
-                kit_vol = -1 * np.ones((kit_vol_shape))
+                # kit_vol = -1 * np.ones((kit_vol_shape))
                 print('part_tsdf:', part_tsdf.shape)
                 print('kit_vol', kit_vol.shape)
-                kit_x = np.ceil((0.05 - delta)/ self.voxel_size).astype(int)
+                kit_x = np.ceil((point_x - delta)/ self.voxel_size).astype(int)
                 kit_y = np.ceil((0.02 - delta)/ self.voxel_size).astype(int)
                 kit_z = np.ceil(obj_bounds[2,1] / self.voxel_size).astype(int)
                 print(kit_z)
@@ -160,19 +151,21 @@ class KitGenerator():
                     kit_y: (kit_y + part_tsdf.shape[1]),
                     -kit_z:,
                 ] = part_tsdf[:, :, :kit_z]
+                point_x += (obj_bounds[0,1] - obj_bounds[0,0] + 0.005)
 
-                kit_mesh_path = kit_folder/ "kit.obj"    
-                if TSDFHelper.to_mesh(kit_vol, kit_mesh_path, self.voxel_size, vol_origin=[0, 0, 0]):
-                    print(shape) 
-                else:
-                    print(shape, ": kit generation failed")
+            kit_mesh_path = kit_folder/ "kit.obj"    
+            if TSDFHelper.to_mesh(kit_vol, kit_mesh_path, self.voxel_size, vol_origin=[0, 0, 0]):
+                print(shape) 
+            else:
+                print(shape, ": kit generation failed")
                 
+                # TODO generate collison model
                 # collision_path = kit_mesh_path.parent / (kit_mesh_path.name[:-4] + '_coll.obj')
                 # name_log = kit_mesh_path.parent / (kit_mesh_path.name[:-4] + '_log.txt')
                 # p.vhacd(str(kit_mesh_path), str(collision_path), str(name_log), alpha=0.04,resolution=50000 )
                 # name_log.unlink()
                 
-                exit(-1)
+                # exit(-1)
 
 
 
@@ -221,7 +214,7 @@ def main(cfg: DictConfig):
     kit_size = np.array(cfg.kit_size)
 
     # set seed
-    seed = 0 if mode == 'train' else -1
+    seed = 10 if mode == 'train' else -1
     np.random.seed(seed)
 
     kit_gen = KitGenerator(mode, data_path, output_path, tool_info, 
