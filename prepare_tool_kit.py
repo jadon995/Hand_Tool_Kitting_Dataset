@@ -56,23 +56,28 @@ class KitGenerator():
         # tool relatived
         self.train_set = list(np.arange(0, 10))
         self.test_set = list(np.arange(10, 15))
-        self.tools = ['hammer', 'plier', 'screwdriver', 'wrench']
-        self.targ_length = [0.2, 0.18, 0.18, 0.18]
+        self.tools = [tool['type'] for tool in tool_info]
+                        # ['hammer', 'plier', 'screwdriver', 'wrench']
+        self.targ_length = [tool['length'] for tool in tool_info]
+                             #[0.2, 0.18, 0.18, 0.18]
         self.n_objects = [1, 1, 1, 1]
 
+        self.mode = mode
         self.data_path = data_path
         self.output_path = output_path
-        self.tool_info = tool_info
         self.kit_size = kit_size
         self.voxel_size = voxel_size
         self.image_size = image_size
-        self.mode = mode
         self.homogeneous = False
 
 
-    def reset(self):
+    def reset(self, iteration=0):
         env = BaseEnv(gui=True)
         p.setGravity(0,0,0)
+
+        # create output folder to store kit info
+        kit_folder = self.output_path / f'{iteration:04d}'
+        kit_folder.mkdir(parents=True, exist_ok=True)
 
         # Setup an orthographic camera
         focal_length = 64e4
@@ -82,8 +87,8 @@ class KitGenerator():
                            z_near=-z-0.05, z_far=-z+0.05, focal_length=focal_length)
 
         # Select objects
-        obj_shapes = []
-        for i, tool in enumerate(self.tools):
+        obj_shapes = [] # e.g. [[7], [3], [3], [9]]
+        for i in range(len(self.tools)):
             if self.mode == 'train':
                 obj_shape = np.random.choice(self.train_set, self.n_objects[i])
             else:
@@ -93,7 +98,7 @@ class KitGenerator():
                     obj_shape = np.random.choice(self.test_set, self.n_objects[i])
             obj_shapes.append(obj_shape)
 
-        kit_vol_shape = np.ceil(self.kit_size / self.voxel_size).astype(np.int)
+        kit_vol_shape = np.ceil(self.kit_size / self.voxel_size).astype(np.int) # e.g. [280, 260, 50]
         print('kit_vol_shape', kit_vol_shape)
         
         # Build Kit
@@ -103,17 +108,71 @@ class KitGenerator():
                     [-0.02, -0.09, 0.0]]
         for i, tool in enumerate(self.tools):
             for j in range(self.n_objects[i]):
-                shape = self.data_path / tool / f'{obj_shapes[i][j]}' / 'object.obj'
+                shape = self.data_path / tool / f'{obj_shapes[i][j]:02d}.obj'
                 print(shape)
-                
-                mesh = trimesh.load(shape, force='mesh')
-                # Center mesh around origin
-                scale_factor = self.targ_length / (mesh.vertices.max(axis=0)-mesh.vertices.min(axis=0))[1]
-                mesh.vertices *= scale_factor
-                mesh.vertices[:, 0:2] -= ( (mesh.vertices.max(axis=0) + mesh.vertices.min(axis=0)) / 2)[0:2]
-                mesh.vertices[:, 2] -= mesh.vertices.min(axis=0)[2] + 0
 
-                # Scale mesh to fit the desired obj_bounds precisely
+                # mesh = trimesh.load(shape, force='mesh')
+                urdf_path = MeshRendererEnv.dump_obj_urdf(shape, 
+                                    rgba=np.array([0, 1, 0, 1]), load_collision_mesh=True)
+                p.loadURDF(str(urdf_path))
+                urdf_path.unlink()
+
+                # define the object bounds
+                mesh = trimesh.load(shape, force='mesh')
+                obj_bounds = np.zeros((3,2), dtype=np.float32)
+                obj_bounds[:,0] = mesh.vertices.min(axis=0)
+                obj_bounds[:,1] = mesh.vertices.max(axis=0)
+                delta = 0.01 # margin is 10 mm
+                obj_bounds[:2, 0] -= delta
+                obj_bounds[:2, 1] += delta
+
+                color_im, depth_im, _ = camera.get_image()
+                part_tsdf = TSDFHelper.tsdf_from_camera_data(
+                views=[(color_im, depth_im,
+                    camera.intrinsics,
+                    camera.pose_matrix)],
+                    bounds=obj_bounds,
+                    voxel_size=self.voxel_size,
+                )
+
+                occ_grid = np.zeros_like(part_tsdf)
+                occ_grid[part_tsdf < 0.2] = -1
+                # # now. Shift the obj volume 
+                # max_delta_voxels = max(1, np.ceil(delta / self.voxel_size).astype(np.int))
+                # k = np.where(occ_grid == -1)
+                # for x_delta_voxels in range(-max_delta_voxels + 1, max_delta_voxels + 1):
+                #     for y_delta_voxels in range(-max_delta_voxels + 1, max_delta_voxels + 1):
+                #         occ_grid[np.clip(k[0] + x_delta_voxels, 0, occ_grid.shape[0] - 1), 
+                #                  np.clip(k[1] + y_delta_voxels, 0, occ_grid.shape[1] - 1),
+                #                  k[2]] = -1
+
+                part_tsdf = -occ_grid
+                # Ok. Now wrap this volumes inside the proper kit volume
+                kit_vol = -1 * np.ones((kit_vol_shape))
+                print('part_tsdf:', part_tsdf.shape)
+                print('kit_vol', kit_vol.shape)
+                kit_x = np.ceil((0.05 - delta)/ self.voxel_size).astype(int)
+                kit_y = np.ceil((0.02 - delta)/ self.voxel_size).astype(int)
+                kit_z = np.ceil(obj_bounds[2,1] / self.voxel_size).astype(int)
+                print(kit_z)
+                kit_vol[
+                    kit_x: (kit_x + part_tsdf.shape[0]),
+                    kit_y: (kit_y + part_tsdf.shape[1]),
+                    -kit_z:,
+                ] = part_tsdf[:, :, :kit_z]
+
+                kit_mesh_path = kit_folder/ "kit.obj"    
+                if TSDFHelper.to_mesh(kit_vol, kit_mesh_path, self.voxel_size, vol_origin=[0, 0, 0]):
+                    print(shape) 
+                else:
+                    print(shape, ": kit generation failed")
+                
+                # collision_path = kit_mesh_path.parent / (kit_mesh_path.name[:-4] + '_coll.obj')
+                # name_log = kit_mesh_path.parent / (kit_mesh_path.name[:-4] + '_log.txt')
+                # p.vhacd(str(kit_mesh_path), str(collision_path), str(name_log), alpha=0.04,resolution=50000 )
+                # name_log.unlink()
+                
+                exit(-1)
 
 
 
@@ -147,12 +206,13 @@ def main(cfg: DictConfig):
     # get object info
     tool_info = cfg.tool_info
     tool_size = {tool['type']:tool['num'] for tool in tool_info}
-    # print(tool_info)
+    print(tool_info)
 
     # get object paths
     mode = cfg.mode
     data_path = Path(cfg.root_data_path)
-    output_path = Path(cfg.output_data_path)
+    output_path = Path(cfg.output_data_path) / f'kit_{mode}'
+    output_path.mkdir(parents=True, exist_ok=True)
 
     # get parameters
     n_samples = cfg.n_samples
@@ -160,17 +220,15 @@ def main(cfg: DictConfig):
     voxel_size = cfg.voxel_size
     kit_size = np.array(cfg.kit_size)
 
-    # for sample_id in len(n_samples):
-        # output_folder = output_path / f'{sample_id:04d}' #e.g. 000
-        # output_folder.mkdir(parents=True, exist_ok=True)
+    # set seed
+    seed = 0 if mode == 'train' else -1
+    np.random.seed(seed)
 
-        # print("Iteration: ", sample_id)
-        # generate_tool_kit(obj_paths, output_folder, tool_info, kit_size, voxel_size, image_size)
     kit_gen = KitGenerator(mode, data_path, output_path, tool_info, 
                             kit_size, voxel_size, image_size)
 
     for i in range(n_samples):
-        kit_gen.reset()
+        kit_gen.reset(i)
 
 
     return
