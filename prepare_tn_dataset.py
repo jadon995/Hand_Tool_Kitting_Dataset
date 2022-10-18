@@ -1,3 +1,4 @@
+from concurrent.futures import process
 from ctypes import sizeof
 from lib2to3.pytree import Base
 from typing import ValuesView
@@ -18,12 +19,16 @@ from os.path import exists
 from scipy import ndimage
 import matplotlib.pyplot as plt
 
-def generate_tn_object(obj_path, output_path, voxel_size, image_size, target_height, target_length):
+def generate_tn_object(mode, obj_path, output_path, voxel_size, image_size, target_height, target_length):
     """ Generate object for TransporterNet
     """
 
     if not exists(obj_path):
+        print('Invalid path', obj_path)
         return
+    if mode != '2d' and mode != '3d':
+        print('Invalide mode', mode)
+        exit(-1)
 
     env=BaseEnv(gui=True)
     p.setGravity(0,0,0)
@@ -43,14 +48,27 @@ def generate_tn_object(obj_path, output_path, voxel_size, image_size, target_hei
     mesh.vertices *= scale_factor
     mesh.vertices[:, 0:2] -= ( (mesh.vertices.max(axis=0) + mesh.vertices.min(axis=0)) / 2)[0:2]
     mesh.vertices[:, 2] -= mesh.vertices.min(axis=0)[2] + 0
-    processed_obj_path = obj_path.parent / f"obj.obj"
-    # processed_obj_path = output_path.parent / (output_path.name[:-4] + '_raw.obj')
-    mesh.export(processed_obj_path)
 
+    # in case mode is 3d
+    if mode == '3d':
+        # generate mesh
+        mesh.export(output_path)
+        # use vhacd to generate the collision model
+        collision_path = output_path.parent / (output_path.name[:-4] + '_coll.obj')
+        name_log = output_path.parent / (output_path.name[:-4] + '_log.txt')
+        p.vhacd(str(output_path), str(collision_path), str(name_log))
+        name_log.unlink()
+        return
+
+    # in case mode is '2d'
+    processed_obj_path = output_path.parent / f"obj.obj"
+    mesh.export(processed_obj_path)
     urdf_path = MeshRendererEnv.dump_obj_urdf(processed_obj_path, 
                                               rgba=np.array([0, 1, 0, 1]),
                                               load_collision_mesh=True)
     p.loadURDF(str(urdf_path))
+    urdf_path.unlink()
+    processed_obj_path.unlink()
     color_im, depth_im, _ = camera.get_image()
 
     # generate the obj_bounds
@@ -117,9 +135,7 @@ def generate_tn_object(obj_path, output_path, voxel_size, image_size, target_hei
     collision_path = output_path.parent / (output_path.name[:-4] + '_coll.obj')
     name_log = output_path.parent / (output_path.name[:-4] + '_log.txt')
     p.vhacd(str(output_path), str(collision_path), str(name_log))
-    # p.vhacd(str(processed_obj_path), str(collision_path), str(name_log))
     name_log.unlink()
-    print(collision_path)
 
     return
 
@@ -146,9 +162,11 @@ def main(cfg: DictConfig):
     # print(tool_size)
 
     # get object paths
+    mode = cfg.mode
     data_path = Path(cfg.root_data_path)
     object_paths = get_obj_paths(data_path, tool_size)
-    output_path = Path(cfg.output_data_path)
+    output_path = Path(cfg.output_data_path) / mode
+    output_path.mkdir(parents=True, exist_ok=True)
 
     # get parameters
     image_size = np.array(cfg.image_size)
@@ -168,7 +186,7 @@ def main(cfg: DictConfig):
         for i in range(num):
             tn_obj_path = tool_folder / f'{i:02d}.obj'
 
-            generate_tn_object(object_paths[type][i],tn_obj_path, voxel_size,
+            generate_tn_object(mode, object_paths[type][i],tn_obj_path, voxel_size,
                                image_size, target_height, target_length)
 
 
