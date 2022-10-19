@@ -91,7 +91,7 @@ class KitGenerator():
         #             [-0.02, -0.09, 0.0]]
         targ_pos = np.array([[0.03, 0.02, 0.0],
                              [-0.03, 0.0, 0.0],
-                             [0.10, 0.0, 0.0],
+                             [0.09, 0.0, 0.0],
                              [-0.09, 0.0, 0.0]])
 
         for i, tool in enumerate(self.tools):
@@ -132,16 +132,16 @@ class KitGenerator():
                 # else:
                 #     print(object_tsdf_path, ": kit generation failed")
 
-                # Dilate the object cavity
+                # Dilate the object cavity (Commented as the dilation is moved to the end)
                 mask3d = part_tsdf < 1.0
-                diamond = ndi.generate_binary_structure(rank=3, connectivity=1)
-                mask3d = ndi.binary_dilation(mask3d, diamond, iterations=3)
-                # mask3d = ndi.binary_erosion(mask3d, diamond, iterations=1, border_value=1)
+                # diamond = ndi.generate_binary_structure(rank=3, connectivity=1)
+                # mask3d = ndi.binary_dilation(mask3d, diamond, iterations=3)
+                # mask3d = ndi.binary_erosion(mask3d, diamond, iterations=2, border_value=1)
 
                 occ_grid = np.zeros_like(part_tsdf)
                 # occ_grid[part_tsdf < 1.0] = -1
                 occ_grid[mask3d] = -1
-                # # now. Shift the obj volume 
+                # # now. Shift the obj volume (Commented as the dilation is changed to binary operation)
                 # max_delta_voxels = max(1, np.ceil(delta / self.voxel_size).astype(np.int))
                 # k = np.where(occ_grid == -1)
                 # for x_delta_voxels in range(-max_delta_voxels + 1, max_delta_voxels + 1):
@@ -165,12 +165,6 @@ class KitGenerator():
                 kit_z = kit_xyz[2]
                 # print(kit_xyz)
 
-                # kit_vol[
-                #     kit_x: (kit_x + part_tsdf.shape[0]),
-                #     kit_y: (kit_y + part_tsdf.shape[1]),
-                #     -kit_z:,
-                # ] = part_tsdf[:, :, :kit_z]
-
                 # merge the kit vol
                 kit_vol_mask[
                     kit_x: (kit_x + part_tsdf.shape[0]),
@@ -178,8 +172,16 @@ class KitGenerator():
                     -kit_z:,
                 ] |= (part_tsdf[:, :, :kit_z] == 1.0)
 
+        # Make the cavity slightly larger by perform binary closing
+        diamond = ndi.generate_binary_structure(rank=3, connectivity=1)
+        kit_vol_mask = ndi.binary_dilation(kit_vol_mask, diamond, iterations=5)
+        kit_vol_mask = ndi.binary_erosion(kit_vol_mask, diamond, iterations=2, border_value=1)
+        
+        # Convert mask to tsdf volume
         kit_vol[kit_vol_mask] = 1
         kit_vol[kit_vol==0.0] = -1
+
+        # Save the mesh
         kit_mesh_path = kit_folder/ "kit_tmp.obj"    
         if TSDFHelper.to_mesh(kit_vol, kit_mesh_path, self.voxel_size, 
                                 vol_origin=[self.voxel_size * 0.5] * 3):
@@ -187,12 +189,16 @@ class KitGenerator():
         else:
             print(shape, ": kit generation failed")
 
-        # smooth mesh
+        # Smoothen the mesh
         mesh = trimesh.load(kit_mesh_path, force='mesh')
         trimesh.smoothing.filter_taubin(mesh, lamb=0.5, nu= 0.0, iterations=10, laplacian_operator=None)
         kit_mesh_smooth = kit_folder/"kit.obj"
         mesh.export(kit_mesh_smooth)
         kit_mesh_path.unlink()
+
+        # TODO object postion relative to the kit mesh frame
+        # obj_pos = targ_pos
+        # obj_pos[:,2] = self.kit_size[2] -  
 
         
         # TODO generate collison model
@@ -205,8 +211,8 @@ class KitGenerator():
 
     def get_kit_xyz(self, obj_center, obj_bound, kit_shape):
         kit_xyz = np.zeros((3,))
-        kit_xyz[:2] = (obj_center + self.kit_size / 2 + obj_bound[:,0])[:2]
-        kit_xyz[2] = obj_bound[2,1]
+        kit_xyz[:2] = (obj_center + self.kit_size / 2 + obj_bound[:,0])[:2] # x, y
+        kit_xyz[2] = obj_bound[2,1] # z
         kit_xyz = np.ceil(kit_xyz / self.voxel_size).astype(int)
         return kit_xyz
 
