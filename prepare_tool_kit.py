@@ -2,6 +2,7 @@ from ctypes import sizeof
 from lib2to3.pytree import Base
 from re import template
 from typing import ValuesView
+from webbrowser import get
 from utils import get_ray_fn, init_ray
 import hydra
 from omegaconf import DictConfig
@@ -33,7 +34,7 @@ class KitGenerator():
         self.train_set = list(np.arange(0, 10))
         self.test_set = list(np.arange(10, 15))
         self.tools = [tool['type'] for tool in tool_info]
-                        # ['hammer', 'plier', 'screwdriver', 'wrench']
+                        # ['hammer', 'plier', 'wrench', 'screwdriver']
         self.targ_length = [tool['length'] for tool in tool_info]
                              #[0.2, 0.18, 0.18, 0.18]
         self.n_objects = [1, 1, 1, 1]
@@ -75,19 +76,27 @@ class KitGenerator():
             obj_shapes.append(obj_shape)
 
         # Kit volume
-        kit_vol_shape = np.ceil(self.kit_size / self.voxel_size).astype(np.int) # e.g. [280, 260, 50]
-        kit_vol = -1 * np.ones((kit_vol_shape))
-        point_x = 0.02
+        kit_vol_shape = np.ceil(self.kit_size / self.voxel_size).astype(np.int) + 2 # e.g. [280, 260, 50]
+
+        # kit_vol = -1 * np.ones((kit_vol_shape))
+        kit_vol = np.zeros((kit_vol_shape))
+        kit_vol_mask = np.ma.make_mask(kit_vol, shrink=False)
+        # point_x = 0.02
         print('kit_vol_shape', kit_vol_shape)
         
         # Build Kit
-        targ_pos = [[-0.02, 0.03, 0.0],
-                    [0.02, -0.03, 0.0],
-                    [0.02, 0.09, 0.0],
-                    [-0.02, -0.09, 0.0]]
+        # targ_pos = [[-0.02, 0.03, 0.0],
+        #             [0.02, -0.03, 0.0],
+        #             [0.02, 0.09, 0.0],
+        #             [-0.02, -0.09, 0.0]]
+        targ_pos = np.array([[0.03, 0.02, 0.0],
+                             [-0.03, 0.0, 0.0],
+                             [0.10, 0.0, 0.0],
+                             [-0.09, 0.0, 0.0]])
+
         for i, tool in enumerate(self.tools):
             for j in range(self.n_objects[i]):
-                shape = self.data_path / tool / f'{obj_shapes[i][j]:02d}.obj'
+                shape = self.data_path / tool / f'{obj_shapes[i][j]:02d}_coll.obj'
                 print(shape)
 
                 # mesh = trimesh.load(shape, force='mesh')
@@ -104,6 +113,7 @@ class KitGenerator():
                 delta = 0.003 # margin is 3mm mm
                 obj_bounds[:2, 0] -= delta
                 obj_bounds[:2, 1] += delta
+                # print('obj_bounds', obj_bounds)
 
                 color_im, depth_im, _ = camera.get_image()
                 part_tsdf = TSDFHelper.tsdf_from_camera_data(
@@ -115,15 +125,18 @@ class KitGenerator():
                 )
                 p.removeBody(object_id)
 
-                mask3d = part_tsdf < 1.0
-                print(mask3d[3,3,:])
-                print(mask3d.shape)
-                diamond = ndi.generate_binary_structure(rank=3, connectivity=1)
-                mask3d = ndi.binary_dilation(mask3d, diamond, iterations=5)
-                # mask3d = ndi.binary_erosion(mask3d, diamond, iterations=5)
-                # mask3d = ndi.binary_closing(mask3d, diamond, iterations=1)
-                # mask3d = ndi.binary_opening(mask3d, diamond, iterations=1)
+                # # Test and visualize the object tsdf 
+                # object_tsdf_path = kit_folder/ f"{tool}_{j}.obj"
+                # if TSDFHelper.to_mesh(part_tsdf, object_tsdf_path, self.voxel_size, vol_origin=[0, 0, 0]):
+                #     print(object_tsdf_path) 
+                # else:
+                #     print(object_tsdf_path, ": kit generation failed")
 
+                # Dilate the object cavity
+                mask3d = part_tsdf < 1.0
+                diamond = ndi.generate_binary_structure(rank=3, connectivity=1)
+                mask3d = ndi.binary_dilation(mask3d, diamond, iterations=3)
+                # mask3d = ndi.binary_erosion(mask3d, diamond, iterations=1, border_value=1)
 
                 occ_grid = np.zeros_like(part_tsdf)
                 # occ_grid[part_tsdf < 1.0] = -1
@@ -140,41 +153,62 @@ class KitGenerator():
                 part_tsdf = -occ_grid
                 # Ok. Now wrap this volumes inside the proper kit volume
                 # kit_vol = -1 * np.ones((kit_vol_shape))
-                print('part_tsdf:', part_tsdf.shape)
-                print('kit_vol', kit_vol.shape)
-                kit_x = np.ceil((point_x - delta)/ self.voxel_size).astype(int)
-                kit_y = np.ceil((0.02 - delta)/ self.voxel_size).astype(int)
-                kit_z = np.ceil(obj_bounds[2,1] / self.voxel_size).astype(int)
-                print(kit_z)
-                kit_vol[
+
+                # print('part_tsdf:', part_tsdf.shape)
+                # print('kit_vol', kit_vol.shape)
+                # kit_x = np.ceil((point_x - delta)/ self.voxel_size).astype(int)
+                # kit_y = np.ceil((0.02 - delta)/ self.voxel_size).astype(int)
+                # kit_z = np.ceil(obj_bounds[2,1] / self.voxel_size).astype(int)
+                kit_xyz = self.get_kit_xyz(targ_pos[i], obj_bounds, kit_vol_shape)
+                kit_x = kit_xyz[0]
+                kit_y = kit_xyz[1]
+                kit_z = kit_xyz[2]
+                # print(kit_xyz)
+
+                # kit_vol[
+                #     kit_x: (kit_x + part_tsdf.shape[0]),
+                #     kit_y: (kit_y + part_tsdf.shape[1]),
+                #     -kit_z:,
+                # ] = part_tsdf[:, :, :kit_z]
+
+                # merge the kit vol
+                kit_vol_mask[
                     kit_x: (kit_x + part_tsdf.shape[0]),
                     kit_y: (kit_y + part_tsdf.shape[1]),
                     -kit_z:,
-                ] = part_tsdf[:, :, :kit_z]
-                point_x += (obj_bounds[0,1] - obj_bounds[0,0] + 0.005)
+                ] |= (part_tsdf[:, :, :kit_z] == 1.0)
 
-            kit_mesh_path = kit_folder/ "kit.obj"    
-            if TSDFHelper.to_mesh(kit_vol, kit_mesh_path, self.voxel_size, vol_origin=[0, 0, 0]):
-                print(shape) 
-            else:
-                print(shape, ": kit generation failed")
-                
-                # TODO generate collison model
-                # collision_path = kit_mesh_path.parent / (kit_mesh_path.name[:-4] + '_coll.obj')
-                # name_log = kit_mesh_path.parent / (kit_mesh_path.name[:-4] + '_log.txt')
-                # p.vhacd(str(kit_mesh_path), str(collision_path), str(name_log), alpha=0.04,resolution=50000 )
-                # name_log.unlink()
-                
-                # exit(-1)
+        kit_vol[kit_vol_mask] = 1
+        kit_vol[kit_vol==0.0] = -1
+        kit_mesh_path = kit_folder/ "kit_tmp.obj"    
+        if TSDFHelper.to_mesh(kit_vol, kit_mesh_path, self.voxel_size, 
+                                vol_origin=[self.voxel_size * 0.5] * 3):
+            print(kit_mesh_path) 
+        else:
+            print(shape, ": kit generation failed")
 
-
-
-        
-        
+        # smooth mesh
+        mesh = trimesh.load(kit_mesh_path, force='mesh')
+        trimesh.smoothing.filter_taubin(mesh, lamb=0.5, nu= 0.0, iterations=10, laplacian_operator=None)
+        kit_mesh_smooth = kit_folder/"kit.obj"
+        mesh.export(kit_mesh_smooth)
+        kit_mesh_path.unlink()
 
         
-
+        # TODO generate collison model
+        # collision_path = kit_mesh_path.parent / (kit_mesh_path.name[:-4] + '_coll.obj')
+        # name_log = kit_mesh_path.parent / (kit_mesh_path.name[:-4] + '_log.txt')
+        # p.vhacd(str(kit_mesh_path), str(collision_path), str(name_log), alpha=0.04,resolution=50000 )
+        # name_log.unlink()
         
+        return
+
+    def get_kit_xyz(self, obj_center, obj_bound, kit_shape):
+        kit_xyz = np.zeros((3,))
+        kit_xyz[:2] = (obj_center + self.kit_size / 2 + obj_bound[:,0])[:2]
+        kit_xyz[2] = obj_bound[2,1]
+        kit_xyz = np.ceil(kit_xyz / self.voxel_size).astype(int)
+        return kit_xyz
 
 
         
@@ -214,7 +248,7 @@ def main(cfg: DictConfig):
     kit_size = np.array(cfg.kit_size)
 
     # set seed
-    seed = 10 if mode == 'train' else -1
+    seed = 1 if mode == 'train' else -1
     np.random.seed(seed)
 
     kit_gen = KitGenerator(mode, data_path, output_path, tool_info, 
