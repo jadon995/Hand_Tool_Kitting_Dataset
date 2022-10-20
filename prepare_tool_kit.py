@@ -93,6 +93,7 @@ class KitGenerator():
                              [-0.03, 0.0, 0.0],
                              [0.09, 0.0, 0.0],
                              [-0.09, 0.0, 0.0]])
+        gt_obj_pos = targ_pos
 
         for i, tool in enumerate(self.tools):
             for j in range(self.n_objects[i]):
@@ -110,9 +111,11 @@ class KitGenerator():
                 obj_bounds = np.zeros((3,2), dtype=np.float32)
                 obj_bounds[:,0] = mesh.vertices.min(axis=0)
                 obj_bounds[:,1] = mesh.vertices.max(axis=0)
-                delta = 0.003 # margin is 3mm mm
-                obj_bounds[:2, 0] -= delta
-                obj_bounds[:2, 1] += delta
+                # delta = 0.003 # margin is 3mm mm
+                delta = [0.005, 0.005, 0.001] # margin for each object
+                obj_bounds[:2, 0] -= delta[0]
+                obj_bounds[:2, 1] += delta[0]
+                obj_bounds[2, 1] += delta[2]
                 # print('obj_bounds', obj_bounds)
 
                 color_im, depth_im, _ = camera.get_image()
@@ -134,9 +137,9 @@ class KitGenerator():
 
                 # Dilate the object cavity (Commented as the dilation is moved to the end)
                 mask3d = part_tsdf < 1.0
-                # diamond = ndi.generate_binary_structure(rank=3, connectivity=1)
-                # mask3d = ndi.binary_dilation(mask3d, diamond, iterations=3)
-                # mask3d = ndi.binary_erosion(mask3d, diamond, iterations=2, border_value=1)
+                diamond = ndi.generate_binary_structure(rank=3, connectivity=1)
+                mask3d = ndi.binary_dilation(mask3d, diamond, iterations=3)
+                # mask3d = ndi.binary_erosion(mask3d, diamond, iterations=1, border_value=1)
 
                 occ_grid = np.zeros_like(part_tsdf)
                 # occ_grid[part_tsdf < 1.0] = -1
@@ -172,10 +175,13 @@ class KitGenerator():
                     -kit_z:,
                 ] |= (part_tsdf[:, :, :kit_z] == 1.0)
 
-        # Make the cavity slightly larger by perform binary closing
-        diamond = ndi.generate_binary_structure(rank=3, connectivity=1)
-        kit_vol_mask = ndi.binary_dilation(kit_vol_mask, diamond, iterations=5)
-        kit_vol_mask = ndi.binary_erosion(kit_vol_mask, diamond, iterations=2, border_value=1)
+                # record the ground truth of object position relative to the kit mesh frame
+                gt_obj_pos[i, 2] = self.kit_size[2] - obj_bounds[2,1]
+
+        # Make the cavity slightly larger by perform binary closing globally
+        # diamond = ndi.generate_binary_structure(rank=3, connectivity=1)
+        # kit_vol_mask = ndi.binary_dilation(kit_vol_mask, diamond, iterations=5)
+        # kit_vol_mask = ndi.binary_erosion(kit_vol_mask, diamond, iterations=2, border_value=1)
         
         # Convert mask to tsdf volume
         kit_vol[kit_vol_mask] = 1
@@ -195,12 +201,7 @@ class KitGenerator():
         kit_mesh_smooth = kit_folder/"kit.obj"
         mesh.export(kit_mesh_smooth)
         kit_mesh_path.unlink()
-
-        # TODO object postion relative to the kit mesh frame
-        # obj_pos = targ_pos
-        # obj_pos[:,2] = self.kit_size[2] -  
-
-        
+   
         # TODO generate collison model
         # collision_path = kit_mesh_path.parent / (kit_mesh_path.name[:-4] + '_coll.obj')
         # name_log = kit_mesh_path.parent / (kit_mesh_path.name[:-4] + '_log.txt')
