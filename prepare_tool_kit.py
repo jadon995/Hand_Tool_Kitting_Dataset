@@ -19,6 +19,8 @@ import ray
 from os.path import exists
 from scipy import ndimage as ndi
 import matplotlib.pyplot as plt
+import json
+import open3d as o3d
 
 
 class KitGenerator():
@@ -95,6 +97,7 @@ class KitGenerator():
                              [-0.09, 0.0, 0.0]])
         gt_obj_pos = targ_pos
 
+        obj_info_list = []
         for i, tool in enumerate(self.tools):
             for j in range(self.n_objects[i]):
                 shape = self.data_path / tool / f'{obj_shapes[i][j]:02d}_coll.obj'
@@ -107,10 +110,17 @@ class KitGenerator():
                 urdf_path.unlink()
 
                 # define the object bounds
-                mesh = trimesh.load(shape, force='mesh')
+                # mesh = trimesh.load(shape, force='mesh')
+                # obj_bounds = np.zeros((3,2), dtype=np.float32)
+                # obj_bounds[:,0] = mesh.vertices.min(axis=0)
+                # obj_bounds[:,1] = mesh.vertices.max(axis=0)
+
+                mesh = o3d.io.read_triangle_mesh(str(shape))
+                mesh = np.asarray(mesh.vertices)
                 obj_bounds = np.zeros((3,2), dtype=np.float32)
-                obj_bounds[:,0] = mesh.vertices.min(axis=0)
-                obj_bounds[:,1] = mesh.vertices.max(axis=0)
+                obj_bounds[:,0] = mesh.min(axis=0)
+                obj_bounds[:,1] = mesh.max(axis=0)
+
                 # delta = 0.003 # margin is 3mm mm
                 delta = [0.005, 0.005, 0.001] # margin for each object
                 obj_bounds[:2, 0] -= delta[0]
@@ -176,7 +186,10 @@ class KitGenerator():
                 ] |= (part_tsdf[:, :, :kit_z] == 1.0)
 
                 # record the ground truth of object position relative to the kit mesh frame
-                gt_obj_pos[i, 2] = self.kit_size[2] - obj_bounds[2,1]
+                gt_obj_pos[i, 2] = self.kit_size[2] - obj_bounds[2,1] + 0.001
+                obj_info = {'type':tool, 'id':int(obj_shapes[i][j]), 'pos': gt_obj_pos[i].tolist()}
+                obj_info_list.append(obj_info)
+
 
         # Make the cavity slightly larger by perform binary closing globally
         # diamond = ndi.generate_binary_structure(rank=3, connectivity=1)
@@ -190,23 +203,38 @@ class KitGenerator():
         # Save the mesh
         kit_mesh_path = kit_folder/ "kit_tmp.obj"    
         if TSDFHelper.to_mesh(kit_vol, kit_mesh_path, self.voxel_size, 
-                                vol_origin=[self.voxel_size * 0.5] * 3):
+                                vol_origin=[self.voxel_size * 0.5, 
+                                            self.voxel_size * 0.5,
+                                            self.voxel_size * ((kit_vol_shape[2]-1)/2)] ): # Set the kit bottom as the zero position 
             print(kit_mesh_path) 
         else:
             print(shape, ": kit generation failed")
 
         # Smoothen the mesh
-        mesh = trimesh.load(kit_mesh_path, force='mesh')
-        trimesh.smoothing.filter_taubin(mesh, lamb=0.5, nu= 0.0, iterations=10, laplacian_operator=None)
+        # mesh = trimesh.load(kit_mesh_path, force='mesh')
+        # trimesh.smoothing.filter_taubin(mesh, lamb=0.5, nu= 0.0, iterations=10, laplacian_operator=None)
+        # kit_mesh_smooth = kit_folder/"kit.obj"
+        # mesh.export(kit_mesh_smooth)
+        # kit_mesh_path.unlink()
         kit_mesh_smooth = kit_folder/"kit.obj"
-        mesh.export(kit_mesh_smooth)
+        mesh = o3d.io.read_triangle_mesh(str(kit_mesh_path))
+        mesh = mesh.filter_smooth_taubin(number_of_iterations=10, lambda_filter=0.5, mu=0.0)
+        o3d.io.write_triangle_mesh(str(kit_mesh_smooth), mesh)
         kit_mesh_path.unlink()
+
+        # TODO mesh simplification
+        # mesh = mesh.simplify_quadric_decimation(target_number_of_triangles=20000)
+        # o3d.io.write_triangle_mesh(str(kit_mesh_smooth), mesh)
    
         # TODO generate collison model
         # collision_path = kit_mesh_path.parent / (kit_mesh_path.name[:-4] + '_coll.obj')
         # name_log = kit_mesh_path.parent / (kit_mesh_path.name[:-4] + '_log.txt')
         # p.vhacd(str(kit_mesh_path), str(collision_path), str(name_log), alpha=0.04,resolution=50000 )
         # name_log.unlink()
+        # kit_mesh_path.unlink()
+
+        # save the ground truth value
+        self.save(kit_folder, obj_info_list)
         
         return
 
@@ -216,6 +244,12 @@ class KitGenerator():
         kit_xyz[2] = obj_bound[2,1] # z
         kit_xyz = np.ceil(kit_xyz / self.voxel_size).astype(int)
         return kit_xyz
+    
+    def save(self, path, data):
+        data_path = path / f'info.json'
+        with open(data_path, 'w') as json_file:
+            json.dump(data, json_file)
+
 
 
         
@@ -255,7 +289,7 @@ def main(cfg: DictConfig):
     kit_size = np.array(cfg.kit_size)
 
     # set seed
-    seed = 1 if mode == 'train' else -1
+    seed = 0 if mode == 'train' else 1
     np.random.seed(seed)
 
     kit_gen = KitGenerator(mode, data_path, output_path, tool_info, 
