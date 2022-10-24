@@ -21,6 +21,7 @@ from scipy import ndimage as ndi
 import matplotlib.pyplot as plt
 import json
 import open3d as o3d
+from subprocess import run
 
 
 class KitGenerator():
@@ -121,8 +122,7 @@ class KitGenerator():
                 obj_bounds[:,0] = mesh.min(axis=0)
                 obj_bounds[:,1] = mesh.max(axis=0)
 
-                # delta = 0.003 # margin is 3mm mm
-                delta = [0.005, 0.005, 0.001] # margin for each object
+                delta = [0.005, 0.005, 0.001] # margin for each object direction in mm
                 obj_bounds[:2, 0] -= delta[0]
                 obj_bounds[:2, 1] += delta[0]
                 obj_bounds[2, 1] += delta[2]
@@ -145,7 +145,7 @@ class KitGenerator():
                 # else:
                 #     print(object_tsdf_path, ": kit generation failed")
 
-                # Dilate the object cavity (Commented as the dilation is moved to the end)
+                # Dilate the object cavity slightly to accommodate the object 
                 mask3d = part_tsdf < 1.0
                 diamond = ndi.generate_binary_structure(rank=3, connectivity=1)
                 mask3d = ndi.binary_dilation(mask3d, diamond, iterations=3)
@@ -201,12 +201,12 @@ class KitGenerator():
         kit_vol[kit_vol==0.0] = -1
 
         # Save the mesh
-        kit_mesh_path = kit_folder/ "kit_tmp.obj"    
-        if TSDFHelper.to_mesh(kit_vol, kit_mesh_path, self.voxel_size, 
+        kit_temp_path = kit_folder/ "kit_tmp.obj"    
+        if TSDFHelper.to_mesh(kit_vol, kit_temp_path, self.voxel_size, 
                                 vol_origin=[self.voxel_size * 0.5, 
                                             self.voxel_size * 0.5,
                                             self.voxel_size * ((kit_vol_shape[2]-1)/2)] ): # Set the kit bottom as the zero position 
-            print(kit_mesh_path) 
+            print(kit_temp_path) 
         else:
             print(shape, ": kit generation failed")
 
@@ -216,13 +216,18 @@ class KitGenerator():
         # kit_mesh_smooth = kit_folder/"kit.obj"
         # mesh.export(kit_mesh_smooth)
         # kit_mesh_path.unlink()
-        kit_mesh_smooth = kit_folder/"kit.obj"
-        mesh = o3d.io.read_triangle_mesh(str(kit_mesh_path))
+        kit_path = kit_folder/"kit.obj"
+        mesh = o3d.io.read_triangle_mesh(str(kit_temp_path))
         mesh = mesh.filter_smooth_taubin(number_of_iterations=10, lambda_filter=0.5, mu=0.0)
-        o3d.io.write_triangle_mesh(str(kit_mesh_smooth), mesh)
-        kit_mesh_path.unlink()
+        o3d.io.write_triangle_mesh(str(kit_path), mesh)
+        kit_temp_path.unlink()
 
         # TODO mesh simplification
+        kit_coll_path = kit_folder / "kit_coll.obj"
+        meshlab_script = self.data_path / "simplify_quadric_decimation.mlx"
+        proc = run(['meshlabserver', '-i', str(kit_path), '-o', str(kit_coll_path), '-s', str(meshlab_script)])
+        # print('exit status code', proc.returncode)
+        # print('kit coll', kit_coll_path)
         # mesh = mesh.simplify_quadric_decimation(target_number_of_triangles=20000)
         # o3d.io.write_triangle_mesh(str(kit_mesh_smooth), mesh)
    
