@@ -21,6 +21,7 @@ from scipy import ndimage as ndi
 import matplotlib.pyplot as plt
 import json
 import open3d as o3d
+import pymeshlab
 from subprocess import run
 
 
@@ -80,18 +81,11 @@ class KitGenerator():
 
         # Kit volume
         kit_vol_shape = np.ceil(self.kit_size / self.voxel_size).astype(np.int) + 2 # e.g. [280, 260, 50]
-
-        # kit_vol = -1 * np.ones((kit_vol_shape))
         kit_vol = np.zeros((kit_vol_shape))
         kit_vol_mask = np.ma.make_mask(kit_vol, shrink=False)
-        # point_x = 0.02
-        print('kit_vol_shape', kit_vol_shape)
+        # print('kit_vol_shape', kit_vol_shape)
         
         # Build Kit
-        # targ_pos = [[-0.02, 0.03, 0.0],
-        #             [0.02, -0.03, 0.0],
-        #             [0.02, 0.09, 0.0],
-        #             [-0.02, -0.09, 0.0]]
         targ_pos = np.array([[0.03, 0.02, 0.0],
                              [-0.03, 0.0, 0.0],
                              [0.09, 0.0, 0.0],
@@ -102,7 +96,7 @@ class KitGenerator():
         for i, tool in enumerate(self.tools):
             for j in range(self.n_objects[i]):
                 shape = self.data_path / tool / f'{obj_shapes[i][j]:02d}_coll.obj'
-                print(shape)
+                print('Object:', shape)
 
                 # mesh = trimesh.load(shape, force='mesh')
                 urdf_path = MeshRendererEnv.dump_obj_urdf(shape, 
@@ -152,26 +146,14 @@ class KitGenerator():
                 # mask3d = ndi.binary_erosion(mask3d, diamond, iterations=1, border_value=1)
 
                 occ_grid = np.zeros_like(part_tsdf)
-                # occ_grid[part_tsdf < 1.0] = -1
                 occ_grid[mask3d] = -1
-                # # now. Shift the obj volume (Commented as the dilation is changed to binary operation)
-                # max_delta_voxels = max(1, np.ceil(delta / self.voxel_size).astype(np.int))
-                # k = np.where(occ_grid == -1)
-                # for x_delta_voxels in range(-max_delta_voxels + 1, max_delta_voxels + 1):
-                #     for y_delta_voxels in range(-max_delta_voxels + 1, max_delta_voxels + 1):
-                #         occ_grid[np.clip(k[0] + x_delta_voxels, 0, occ_grid.shape[0] - 1), 
-                #                  np.clip(k[1] + y_delta_voxels, 0, occ_grid.shape[1] - 1),
-                #                  k[2]] = -1
 
                 part_tsdf = -occ_grid
-                # Ok. Now wrap this volumes inside the proper kit volume
-                # kit_vol = -1 * np.ones((kit_vol_shape))
 
                 # print('part_tsdf:', part_tsdf.shape)
                 # print('kit_vol', kit_vol.shape)
-                # kit_x = np.ceil((point_x - delta)/ self.voxel_size).astype(int)
-                # kit_y = np.ceil((0.02 - delta)/ self.voxel_size).astype(int)
-                # kit_z = np.ceil(obj_bounds[2,1] / self.voxel_size).astype(int)
+
+                # Ok. Now wrap this volumes inside the proper kit volume
                 kit_xyz = self.get_kit_xyz(targ_pos[i], obj_bounds, kit_vol_shape)
                 kit_x = kit_xyz[0]
                 kit_y = kit_xyz[1]
@@ -191,7 +173,7 @@ class KitGenerator():
                 obj_info_list.append(obj_info)
 
 
-        # Make the cavity slightly larger by perform binary closing globally
+        # # Make the cavity slightly larger by perform binary closing globally (Operation shifts to local areas.)
         # diamond = ndi.generate_binary_structure(rank=3, connectivity=1)
         # kit_vol_mask = ndi.binary_dilation(kit_vol_mask, diamond, iterations=5)
         # kit_vol_mask = ndi.binary_erosion(kit_vol_mask, diamond, iterations=2, border_value=1)
@@ -206,7 +188,7 @@ class KitGenerator():
                                 vol_origin=[self.voxel_size * 0.5, 
                                             self.voxel_size * 0.5,
                                             self.voxel_size * ((kit_vol_shape[2]-1)/2)] ): # Set the kit bottom as the zero position 
-            print(kit_temp_path) 
+            print('Save TSDF:', kit_temp_path) 
         else:
             print(shape, ": kit generation failed")
 
@@ -216,21 +198,44 @@ class KitGenerator():
         # kit_mesh_smooth = kit_folder/"kit.obj"
         # mesh.export(kit_mesh_smooth)
         # kit_mesh_path.unlink()
-        kit_path = kit_folder/"kit.obj"
-        mesh = o3d.io.read_triangle_mesh(str(kit_temp_path))
-        mesh = mesh.filter_smooth_taubin(number_of_iterations=10, lambda_filter=0.5, mu=0.0)
-        o3d.io.write_triangle_mesh(str(kit_path), mesh)
-        kit_temp_path.unlink()
+        # kit_path = kit_folder/"kit.obj"
+        # mesh = o3d.io.read_triangle_mesh(str(kit_temp_path))
+        # mesh = mesh.filter_smooth_taubin(number_of_iterations=10, lambda_filter=0.5, mu=0.0)
+        # o3d.io.write_triangle_mesh(str(kit_path), mesh)
+        # kit_temp_path.unlink()
 
-        # TODO mesh simplification
-        kit_coll_path = kit_folder / "kit_coll.obj"
-        meshlab_script = self.data_path / "simplify_quadric_decimation.mlx"
-        proc = run(['meshlabserver', '-i', str(kit_path), '-o', str(kit_coll_path), '-s', str(meshlab_script)])
+        # mesh simplification
+        # kit_coll_path = kit_folder / "kit_coll.obj"
+        # meshlab_script = self.data_path / "simplify_quadric_decimation.mlx"
+        # proc = run(['meshlabserver', '-i', str(kit_path), '-o', str(kit_coll_path), '-s', str(meshlab_script)])
         # print('exit status code', proc.returncode)
         # print('kit coll', kit_coll_path)
         # mesh = mesh.simplify_quadric_decimation(target_number_of_triangles=20000)
         # o3d.io.write_triangle_mesh(str(kit_mesh_smooth), mesh)
-   
+
+        # pymeshlab
+        ms = pymeshlab.MeshSet()
+        ms.load_new_mesh(str(kit_temp_path))
+        
+        # Smoothen the mesh
+        kit_path = kit_folder/"kit.obj"
+        ms.apply_coord_taubin_smoothing(lambda_=0.5, mu=0.0, stepsmoothnum=10)
+        ms.save_current_mesh(str(kit_path))
+
+        # Simplify the mesh
+        kit_coll_path = kit_folder / "kit_coll.obj"
+        ms.meshing_decimation_quadric_edge_collapse(targetfacenum=0,
+                                                    targetperc=0.01,
+                                                    qualitythr=0.3,
+                                                    preserveboundary=True,
+                                                    boundaryweight=1,
+                                                    preservenormal=False,
+                                                    preservetopology=True,
+                                                    optimalplacement=True,
+                                                    planarquadric=True,
+                                                    )
+        ms.save_current_mesh(str(kit_coll_path))
+        
         # TODO generate collison model
         # collision_path = kit_mesh_path.parent / (kit_mesh_path.name[:-4] + '_coll.obj')
         # name_log = kit_mesh_path.parent / (kit_mesh_path.name[:-4] + '_log.txt')
@@ -240,6 +245,9 @@ class KitGenerator():
 
         # save the ground truth value
         self.save(kit_folder, obj_info_list)
+        
+        # delete the temp mesh
+        kit_temp_path.unlink()
         
         return
 
@@ -253,11 +261,7 @@ class KitGenerator():
     def save(self, path, data):
         data_path = path / f'info.json'
         with open(data_path, 'w') as json_file:
-            json.dump(data, json_file)
-
-
-
-        
+            json.dump(data, json_file)      
 
 
 @hydra.main(config_path="conf/data_gen", config_name="tool_kit")
@@ -293,17 +297,18 @@ def main(cfg: DictConfig):
     voxel_size = cfg.voxel_size
     kit_size = np.array(cfg.kit_size)
 
-    # set seed
+    # fix the seed
     seed = 0 if mode == 'train' else 1
     np.random.seed(seed)
 
+    # initilize the kit generator 
     kit_gen = KitGenerator(mode, data_path, output_path, tool_info, 
                             kit_size, voxel_size, image_size)
 
+    # generate the kits
     for i in range(n_samples):
+        print('Generate Kit', i)
         kit_gen.reset(i)
-
-
     return
 
 
