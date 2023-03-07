@@ -17,6 +17,7 @@ from skimage.morphology import label
 import ray
 from os.path import exists
 from scipy import ndimage
+from scipy.spatial.transform import Rotation
 import matplotlib.pyplot as plt
 
 def generate_tn_object(mode, obj_path, output_path, voxel_size, image_size, target_height, target_length):
@@ -30,6 +31,7 @@ def generate_tn_object(mode, obj_path, output_path, voxel_size, image_size, targ
         print('Invalide mode', mode)
         exit(-1)
 
+    ''' pybullet engine (deprecated)
     env=BaseEnv(gui=True)
     p.setGravity(0,0,0)
 
@@ -40,19 +42,34 @@ def generate_tn_object(mode, obj_path, output_path, voxel_size, image_size, targ
     view_matrix = p.computeViewMatrix((0, 0, z), (0, 0, 0), (1, 0, 0))
     camera = SimCameraBase(view_matrix, image_size,
                            z_near=-z-0.05, z_far=-z+0.05, focal_length=focal_length)
+    '''
 
     # load and modify meshes
     mesh = trimesh.load(obj_path, force='mesh')
     # scale to suitable size
     scale_factor = target_length / (mesh.vertices.max(axis=0)-mesh.vertices.min(axis=0))[1]
     mesh.vertices *= scale_factor
-    mesh.vertices[:, 0:2] -= ( (mesh.vertices.max(axis=0) + mesh.vertices.min(axis=0)) / 2)[0:2]
-    mesh.vertices[:, 2] -= mesh.vertices.min(axis=0)[2] + 0
+    mesh.vertices[:, 1:3] -= ((mesh.vertices.max(axis=0) + mesh.vertices.min(axis=0)) / 2)[1:3]
+    # mesh.vertices[:, 2] -= mesh.vertices.min(axis=0)[2] + 0
+
+    '''
+    # algn the mesh to the principal axis
+    transform_to_principal = np.asarray(mesh.principal_inertia_transform)
+    transform_adjusted = np.eye(4, dtype=np.float)
+    # transform_adjusted[:3, :3] = (Rotation.from_euler("zyx", [90, 0, -90], degrees=True)).as_matrix()
+    mesh.apply_transform(np.matmul(transform_adjusted, transform_to_principal))
+    mesh.vertices[:, 0:3] -= ( (mesh.vertices.max(axis=0) + mesh.vertices.min(axis=0)) / 2)[0:3]
+    # print(transform_adjusted)
+    # print(transform_to_principal)
+    # print(np.matmul(transform_adjusted, transform_to_principal))
+    print((Rotation.from_euler("zyx", [90, 0, -90], degrees=True)).as_matrix())
+    '''
 
     # in case mode is 3d
     if mode == '3d':
         # generate mesh
         mesh.export(output_path)
+
         # use vhacd to generate the collision model
         collision_path = output_path.parent / (output_path.name[:-4] + '_coll.obj')
         name_log = output_path.parent / (output_path.name[:-4] + '_log.txt')

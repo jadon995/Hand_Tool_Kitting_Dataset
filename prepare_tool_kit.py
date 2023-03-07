@@ -37,7 +37,7 @@ class KitGenerator():
         # tool relatived
         self.train_set = list(np.arange(0, 10))
         self.test_set = list(np.arange(10, 15))
-        self.tools = [tool['type'] for tool in tool_info]
+        self.tool_types = [tool['type'] for tool in tool_info]
                         # ['hammer', 'plier', 'wrench', 'screwdriver']
         self.targ_length = [tool['length'] for tool in tool_info]
                              #[0.2, 0.18, 0.18, 0.18]
@@ -65,11 +65,11 @@ class KitGenerator():
         z=-200
         view_matrix = p.computeViewMatrix((0, 0, z), (0, 0, 0), (1, 0, 0))
         camera = SimCameraBase(view_matrix, self.image_size,
-                           z_near=-z-0.05, z_far=-z+0.05, focal_length=focal_length)
+                           z_near=-z-0.1, z_far=-z+0.1, focal_length=focal_length)
 
         # Select objects
         obj_shapes = [] # e.g. [[7], [3], [3], [9]]
-        for i in range(len(self.tools)):
+        for i in range(len(self.tool_types)):
             if self.mode == 'train':
                 obj_shape = np.random.choice(self.train_set, self.n_objects[i])
             else:
@@ -86,14 +86,14 @@ class KitGenerator():
         # print('kit_vol_shape', kit_vol_shape)
         
         # Build Kit
-        targ_pos = np.array([[0.03, 0.02, 0.0],
-                             [-0.03, 0.0, 0.0],
-                             [0.09, 0.0, 0.0],
-                             [-0.09, 0.0, 0.0]])
+        targ_pos = np.array([[0.03, 0.02, 0.0],     # hammer
+                             [-0.03, 0.0, 0.0],     # plier
+                             [0.09, 0.0, 0.0],      # wrench
+                             [-0.09, 0.0, 0.0]])    # screwdriver
         gt_obj_pos = targ_pos
 
         obj_info_list = []
-        for i, tool in enumerate(self.tools):
+        for i, tool in enumerate(self.tool_types):
             for j in range(self.n_objects[i]):
                 shape = self.data_path / tool / f'{obj_shapes[i][j]:02d}_coll.obj'
                 print('Object:', shape)
@@ -115,12 +115,16 @@ class KitGenerator():
                 obj_bounds = np.zeros((3,2), dtype=np.float32)
                 obj_bounds[:,0] = mesh.min(axis=0)
                 obj_bounds[:,1] = mesh.max(axis=0)
-
-                delta = [0.005, 0.005, 0.001] # margin for each object direction in mm
-                obj_bounds[:2, 0] -= delta[0]
-                obj_bounds[:2, 1] += delta[0]
-                obj_bounds[2, 1] += delta[2]
                 # print('obj_bounds', obj_bounds)
+
+
+                delta = np.array([0.005, 0.005, 0.001]) # margin for each object direction in mm
+                # obj_bounds[:2, 0] -= delta[0]
+                # obj_bounds[:2, 1] += delta[1]
+                # obj_bounds[2, 1] += delta[2]
+                obj_bounds[:3, 0] -= delta[:3]
+                obj_bounds[:3, 1] += delta[:3]
+                print('obj_bounds', obj_bounds)
 
                 color_im, depth_im, _ = camera.get_image()
                 part_tsdf = TSDFHelper.tsdf_from_camera_data(
@@ -131,6 +135,8 @@ class KitGenerator():
                     voxel_size=self.voxel_size,
                 )
                 p.removeBody(object_id)
+
+                print('tsdf_shape', part_tsdf.shape)
 
                 # # Test and visualize the object tsdf 
                 # object_tsdf_path = kit_folder/ f"{tool}_{j}.obj"
@@ -168,7 +174,9 @@ class KitGenerator():
                 ] |= (part_tsdf[:, :, :kit_z] == 1.0)
 
                 # record the ground truth of object position relative to the kit mesh frame
-                gt_obj_pos[i, 2] = self.kit_size[2] - obj_bounds[2,1] + 0.001
+                center2origin = (mesh.min(axis=0) + mesh.max(axis=0)) / 2
+                gt_obj_pos[i] -= center2origin
+                gt_obj_pos[i, 2] = self.kit_size[2] - (obj_bounds[2,1] - obj_bounds[2,0]) / 2  #+ 0.001
                 obj_info = {'type':tool, 'id':int(obj_shapes[i][j]), 'pos': gt_obj_pos[i].tolist()}
                 obj_info_list.append(obj_info)
 
@@ -254,7 +262,7 @@ class KitGenerator():
     def get_kit_xyz(self, obj_center, obj_bound, kit_shape):
         kit_xyz = np.zeros((3,))
         kit_xyz[:2] = (obj_center + self.kit_size / 2 + obj_bound[:,0])[:2] # x, y
-        kit_xyz[2] = obj_bound[2,1] # z
+        kit_xyz[2] = obj_bound[2,1] - obj_bound[2, 0] # z
         kit_xyz = np.ceil(kit_xyz / self.voxel_size).astype(int)
         return kit_xyz
     

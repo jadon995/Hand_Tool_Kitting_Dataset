@@ -13,16 +13,16 @@ kit_size: [0.28, 0.26, 0.05]
 tool_info:
   - type: "hammer"
     num: 15
-    length: 0.2
+    length: [0.18, 0.2]
   - type: "plier"
     num: 15
-    length: 0.18
+    length: [0.15, 0.18]
   - type: "wrench"
     num: 15
-    length: 0.18
+    length: [0.15, 0.18]
   - type: "screwdriver"
     num: 15
-    length: 0.18
+    length: [0.15, 0.18]
 
 # it affects the output directory
 hydra:
