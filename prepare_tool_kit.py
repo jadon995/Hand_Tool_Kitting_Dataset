@@ -39,8 +39,8 @@ class KitGenerator():
         self.test_set = list(np.arange(10, 15))
         self.tool_types = [tool['type'] for tool in tool_info]
                         # ['hammer', 'plier', 'wrench', 'screwdriver']
-        self.targ_length = [tool['length'] for tool in tool_info]
-                             #[0.2, 0.18, 0.18, 0.18]
+        self.tool_length_range = [tool['length'] for tool in tool_info]
+                             #[[0.19, 0.2], [0.15, 0.18], [0.15, 0.18], [0.15, 0.18]]
         self.n_objects = [1, 1, 1, 1]
 
         self.mode = mode
@@ -69,7 +69,13 @@ class KitGenerator():
 
         # Select objects
         obj_shapes = [] # e.g. [[7], [3], [3], [9]]
+        obj_lengths = []
         for i in range(len(self.tool_types)):
+            # comppute the target length
+            scale = np.random.uniform(low=0, high=1)
+            length = self.tool_length_range[i][0] + (self.tool_length_range[i][1] - self.tool_length_range[i][0]) * scale
+            obj_lengths.append(length)
+
             if self.mode == 'train':
                 obj_shape = np.random.choice(self.train_set, self.n_objects[i])
             else:
@@ -88,8 +94,8 @@ class KitGenerator():
         # Build Kit
         targ_pos = np.array([[0.03, 0.02, 0.0],     # hammer
                              [-0.03, 0.0, 0.0],     # plier
-                             [0.09, 0.0, 0.0],      # wrench
-                             [-0.09, 0.0, 0.0]])    # screwdriver
+                             [-0.09, 0.0, 0.0],      # wrench
+                             [0.09, 0.0, 0.0]])    # screwdriver
         gt_obj_pos = targ_pos
 
         obj_info_list = []
@@ -98,9 +104,18 @@ class KitGenerator():
                 shape = self.data_path / tool / f'{obj_shapes[i][j]:02d}_coll.obj'
                 print('Object:', shape)
 
+                # load mesh
+                mesh = o3d.io.read_triangle_mesh(str(shape))
+                mesh = np.asarray(mesh.vertices)
+
+                # compute and apply scale
+                obj_scale = obj_lengths[i] / (mesh.max(axis=0) - mesh.min(axis=0))[1]
+                mesh = mesh * obj_scale
+                # print('obj_scale', obj_scale)
+
                 # mesh = trimesh.load(shape, force='mesh')
-                urdf_path = MeshRendererEnv.dump_obj_urdf(shape, 
-                                    rgba=np.array([0, 1, 0, 1]), load_collision_mesh=True)
+                urdf_path = MeshRendererEnv.dump_obj_urdf(shape, rgba=np.array([0, 1, 0, 1]), 
+                                                          load_collision_mesh=True, scale=obj_scale)
                 object_id = p.loadURDF(str(urdf_path))
                 urdf_path.unlink()
 
@@ -110,8 +125,6 @@ class KitGenerator():
                 # obj_bounds[:,0] = mesh.vertices.min(axis=0)
                 # obj_bounds[:,1] = mesh.vertices.max(axis=0)
 
-                mesh = o3d.io.read_triangle_mesh(str(shape))
-                mesh = np.asarray(mesh.vertices)
                 obj_bounds = np.zeros((3,2), dtype=np.float32)
                 obj_bounds[:,0] = mesh.min(axis=0)
                 obj_bounds[:,1] = mesh.max(axis=0)
@@ -124,7 +137,7 @@ class KitGenerator():
                 # obj_bounds[2, 1] += delta[2]
                 obj_bounds[:3, 0] -= delta[:3]
                 obj_bounds[:3, 1] += delta[:3]
-                print('obj_bounds', obj_bounds)
+                # print('obj_bounds', obj_bounds)
 
                 color_im, depth_im, _ = camera.get_image()
                 part_tsdf = TSDFHelper.tsdf_from_camera_data(
@@ -136,7 +149,7 @@ class KitGenerator():
                 )
                 p.removeBody(object_id)
 
-                print('tsdf_shape', part_tsdf.shape)
+                # print('tsdf_shape', part_tsdf.shape)
 
                 # # Test and visualize the object tsdf 
                 # object_tsdf_path = kit_folder/ f"{tool}_{j}.obj"
@@ -147,23 +160,33 @@ class KitGenerator():
 
                 # Dilate the object cavity slightly to accommodate the object 
                 mask3d = part_tsdf < 1.0
+
+                pad = 15
+                padding_size = np.array([[pad, pad], [pad, pad], [pad, pad]])
+                # print(mask3d.shape)
+                mask3d = np.pad(mask3d, padding_size, 'constant')
+                # print(mask3d.shape)
+                # mask3d = mask3d[pad:-pad, pad:-pad, pad:-pad]
+                # print(mask3d.shape)
+
                 diamond = ndi.generate_binary_structure(rank=3, connectivity=1)
-                mask3d = ndi.binary_dilation(mask3d, diamond, iterations=3)
-                # mask3d = ndi.binary_erosion(mask3d, diamond, iterations=1, border_value=1)
+                mask3d = ndi.binary_dilation(mask3d, diamond, iterations=10)
+                mask3d = ndi.binary_erosion(mask3d, diamond, iterations=6)
+                mask3d = mask3d[pad:-pad, pad:-pad, pad:-pad]
 
                 occ_grid = np.zeros_like(part_tsdf)
                 occ_grid[mask3d] = -1
 
                 part_tsdf = -occ_grid
 
-                # print('part_tsdf:', part_tsdf.shape)
-                # print('kit_vol', kit_vol.shape)
+                print('part_tsdf:', part_tsdf.shape)
+                print('kit_vol', kit_vol.shape)
 
                 # Ok. Now wrap this volumes inside the proper kit volume
                 kit_xyz = self.get_kit_xyz(targ_pos[i], obj_bounds, kit_vol_shape)
                 kit_x = kit_xyz[0]
                 kit_y = kit_xyz[1]
-                kit_z = kit_xyz[2]
+                kit_z = min(kit_xyz[2], part_tsdf.shape[2])
                 # print(kit_xyz)
 
                 # merge the kit vol
@@ -174,10 +197,9 @@ class KitGenerator():
                 ] |= (part_tsdf[:, :, :kit_z] == 1.0)
 
                 # record the ground truth of object position relative to the kit mesh frame
-                center2origin = (mesh.min(axis=0) + mesh.max(axis=0)) / 2
-                gt_obj_pos[i] -= center2origin
                 gt_obj_pos[i, 2] = self.kit_size[2] - (obj_bounds[2,1] - obj_bounds[2,0]) / 2  #+ 0.001
-                obj_info = {'type':tool, 'id':int(obj_shapes[i][j]), 'pos': gt_obj_pos[i].tolist()}
+                obj_info = {'type':tool, 'id':int(obj_shapes[i][j]), 
+                            'pos': gt_obj_pos[i].tolist(), 'scale': obj_scale}
                 obj_info_list.append(obj_info)
 
 
@@ -185,6 +207,14 @@ class KitGenerator():
         # diamond = ndi.generate_binary_structure(rank=3, connectivity=1)
         # kit_vol_mask = ndi.binary_dilation(kit_vol_mask, diamond, iterations=5)
         # kit_vol_mask = ndi.binary_erosion(kit_vol_mask, diamond, iterations=2, border_value=1)
+
+        def project_cut(a):
+            indice = np.where(a == True)
+            if len(indice[0]) > 0:
+                a[indice[0][-1]:] = True
+            return a
+        
+        kit_vol_mask = np.apply_along_axis(project_cut, 2, kit_vol_mask)
         
         # Convert mask to tsdf volume
         kit_vol[kit_vol_mask] = 1

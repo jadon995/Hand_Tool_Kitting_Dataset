@@ -17,7 +17,7 @@ visual_geom_template = """
         <visual>
           <origin rpy="0 0 0" xyz="0 0 0"/>
           <geometry>
-            <mesh filename="{mesh_path}" scale="1 1 1"/>
+            <mesh filename="{mesh_path}" scale="{scale} {scale} {scale}"/>
           </geometry>
             <material name="{red}_{green}_{blue}_{alpha}">
                 <color rgba="{red} {green} {blue} {alpha}"/>
@@ -28,7 +28,7 @@ collision_geom_template = """
         <collision>
           <origin rpy="0 0 0" xyz="0 0 0"/>
           <geometry>
-            <mesh filename="{mesh_path}" scale="1 1 1"/>
+            <mesh filename="{mesh_path}" scale="{scale} {scale} {scale}"/>
           </geometry>
             <material>
                 <color rgba="{red} {green} {blue} {alpha}"/>
@@ -58,15 +58,16 @@ class MeshRendererEnv(BaseEnv):
         self.bb_max = -np.infty * np.ones((3,))
 
     @staticmethod
-    def dump_obj_urdf(mesh_path, urdf_path=None, rgba: np.ndarray = np.ones((4,)), load_collision_mesh: bool = False):
+    def dump_obj_urdf(mesh_path, urdf_path=None, rgba: np.ndarray = np.ones((4,)), 
+                      load_collision_mesh: bool = False, scale: float = 1.0):
         if urdf_path is None:
           urdf_path = mesh_path.parent / f"{mesh_path.stem}.urdf"
         with open(urdf_path, "w") as f:
             visual_geom = visual_geom_template.format(
-                mesh_path=mesh_path, red=rgba[0], green=rgba[1], blue=rgba[2], alpha=rgba[3])
+                mesh_path=mesh_path, scale=scale, red=rgba[0], green=rgba[1], blue=rgba[2], alpha=rgba[3])
             if load_collision_mesh:
                 collision_geom = collision_geom_template.format(
-                    mesh_path=mesh_path, red=rgba[0], green=rgba[1], blue=rgba[2], alpha=rgba[3])
+                    mesh_path=mesh_path, scale=scale, red=rgba[0], green=rgba[1], blue=rgba[2], alpha=rgba[3])
             else:
                 collision_geom = ""
             f.write(grasp_object_template.format(visual_geom=visual_geom, collision_geom=collision_geom))

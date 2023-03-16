@@ -4,7 +4,7 @@ mode: "train"
 root_data_path: "dataset/toolbox_cad/tn/3d"
 output_data_path: "dataset/toolbox_cad/tn/3d"
 
-n_samples: 10
+n_samples: 100
 
 image_size: [720, 1280]  # height, width
 voxel_size: 0.001
@@ -19,10 +19,10 @@ tool_info:
     length: [0.15, 0.18]
   - type: "wrench"
     num: 15
-    length: [0.15, 0.18]
+    length: [0.15, 0.2]
   - type: "screwdriver"
     num: 15
-    length: [0.15, 0.18]
+    length: [0.12, 0.18]
 
 # it affects the output directory
 hydra:
