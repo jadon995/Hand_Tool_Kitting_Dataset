@@ -1,6 +1,6 @@
 # This file contains the parameters for data generation of transporter net.
 
-mode: "train"
+mode: "test"
 root_data_path: "dataset/toolbox_cad/tn/3d"
 output_data_path: "dataset/toolbox_cad/tn/3d"
 

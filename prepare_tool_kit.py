@@ -171,7 +171,7 @@ class KitGenerator():
 
                 diamond = ndi.generate_binary_structure(rank=3, connectivity=1)
                 mask3d = ndi.binary_dilation(mask3d, diamond, iterations=10)
-                mask3d = ndi.binary_erosion(mask3d, diamond, iterations=6)
+                mask3d = ndi.binary_erosion(mask3d, diamond, iterations=8)
                 mask3d = mask3d[pad:-pad, pad:-pad, pad:-pad]
 
                 occ_grid = np.zeros_like(part_tsdf)
